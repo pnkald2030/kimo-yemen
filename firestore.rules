@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function activeAccount() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && myProfile().active == true;
+    }
+    function isAdmin() {
+      return activeAccount() && (myProfile().role == 'owner' || myProfile().role == 'admin');
+    }
+
+    // Roles are provisioned manually by the project owner or a trusted server only.
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // Public can read approved listings. An authenticated business owner can read their own listing.
+    // All writes stay disabled until the app's cloud write workflow is implemented and tested.
+    match /businesses/{businessId} {
+      allow get, list: if (resource.data.status == 'approved')
+        || isAdmin()
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // Private workflow collections remain closed during migration.
+    match /businessRequests/{requestId} {
+      allow read, write: if false;
+    }
+    match /namePhoneRequests/{requestId} {
+      allow read, write: if false;
+    }
+    match /notifications/{notificationId} {
+      allow read, write: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
